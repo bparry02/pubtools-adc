@@ -71,7 +71,6 @@ class ADCPush(AmiBase, AWSPublishService, CollectorService):
         name = self.name_from_metadata(push_item)
         LOG.info("Image name: %s", name)
 
-        container = "%s-%s" % (self.args.container_prefix, region)
         _accounts = self.args.accounts
         if region in _accounts:
             accounts = list(_accounts[region].values())
@@ -88,7 +87,7 @@ class ADCPush(AmiBase, AWSPublishService, CollectorService):
             "image_path": file_path,
             "image_name": name,
             "snapshot_name": name,
-            "container": container,
+            "container": self.args.container_prefix,
             "description": push_item.description,
             "arch": push_item.release.arch,
             "virt_type": push_item.virtualization,
