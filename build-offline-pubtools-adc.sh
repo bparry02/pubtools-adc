@@ -11,25 +11,6 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Script configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR=".venv"
-OFFLINE_DIR="offline-pubtools-adc"
-DIST_DIR="${OFFLINE_DIR}/dist"
-TARBALL_OUTPUT_DIR="dist/offline"
-VERSION=$(grep "version=" setup.py | sed 's/.*version="\([^"]*\)".*/\1/')
-TARBALL_NAME="pubtools-adc-offline-${VERSION}.tar.gz"
-TARBALL_PATH="${TARBALL_OUTPUT_DIR}/${TARBALL_NAME}"
-
-echo -e "${BLUE}🔧 Building pubtools-adc Offline Package${NC}"
-echo -e "${BLUE}======================================${NC}"
-echo "Version: $VERSION"
-echo "Offline directory: $OFFLINE_DIR"
-echo "Distribution directory: $DIST_DIR"
-echo "Output directory: $TARBALL_OUTPUT_DIR"
-echo "Output tarball: $TARBALL_PATH"
-echo
-
 # Function to print status
 print_status() {
     echo -e "${GREEN}✓${NC} $1"
@@ -42,6 +23,36 @@ print_warning() {
 print_error() {
     echo -e "${RED}✗${NC} $1"
 }
+
+# Script configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR=".venv"
+OFFLINE_DIR="offline-pubtools-adc"
+DIST_DIR="${OFFLINE_DIR}/dist"
+TARBALL_OUTPUT_DIR="dist/offline"
+PY_MODULE_VERSION=$(grep "version=" setup.py | sed 's/.*version="\([^"]*\)".*/\1/')
+VERSION=$(git tag --sort=creatordate | grep -P '\d{4}-\d{2}-\d{2}' | tail -n1)
+
+# Check if we got a valid version
+if [[ -z "$VERSION" ]]; then
+    print_error "Could not determine version from git tags"
+    echo "No git tags found matching date pattern YYYY-MM-DD"
+    echo "Please ensure git tags are available or create one:"
+    echo "  git tag $(date +%Y-%m-%d)"
+    exit 1
+fi
+
+TARBALL_NAME="pubtools-adc-offline-${VERSION}.tar.gz"
+TARBALL_PATH="${TARBALL_OUTPUT_DIR}/${TARBALL_NAME}"
+
+echo -e "${BLUE}🔧 Building pubtools-adc Offline Package${NC}"
+echo -e "${BLUE}======================================${NC}"
+echo "Version: $VERSION (from git tag)"
+echo "Offline directory: $OFFLINE_DIR"
+echo "Distribution directory: $DIST_DIR"
+echo "Output directory: $TARBALL_OUTPUT_DIR"
+echo "Output tarball: $TARBALL_PATH"
+echo
 
 # Check if offline directory exists
 if [[ ! -d "$OFFLINE_DIR" ]]; then
@@ -104,12 +115,12 @@ python -m build --wheel --outdir dist/ > /dev/null 2>&1
 
 # Copy the built wheel to distribution directory
 print_status "Copying pubtools-adc wheel to distribution directory..."
-cp "dist/pubtools_adc-${VERSION}-py3-none-any.whl" "$DIST_DIR/"
+cp "dist/pubtools_adc-${PY_MODULE_VERSION}-py3-none-any.whl" "$DIST_DIR/"
 
 # Download all dependency wheels
 print_status "Downloading dependency wheels..."
 echo "  This may take a few minutes..."
-pip download -q -d "$DIST_DIR" -r requirements.in
+pip download -q -d "$DIST_DIR" -r requirements.txt
 
 # Convert any source distributions to wheels
 print_status "Converting source distributions to wheels..."
