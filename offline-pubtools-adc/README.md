@@ -17,7 +17,7 @@ That's it! No internet connection required.
 
 ## 📦 Package Contents
 
-- `dist/` - Directory containing pre-built wheels including:
+- `lib/` - Directory containing pre-built wheels including:
   - `pubtools_adc-*.whl` - The main package
   - All dependencies (AWS SDK, crypto libraries, etc.)
 - `install-offline.sh` - **Fully offline** installation script
@@ -44,7 +44,7 @@ python3 -m venv pubtools-adc-env
 source pubtools-adc-env/bin/activate
 
 # Install all wheels offline
-pip install --no-index --find-links dist/ dist/*.whl
+pip install --no-index --find-links lib/ lib/*.whl
 
 # Verify
 pubtools-adc-push --help
@@ -126,8 +126,8 @@ chmod +x install-offline.sh
 - Check: `python3 --version`
 
 ### Issue: No wheels found
-- Ensure you've run the build script to populate the `dist/` directory
-- Check: `ls dist/*.whl`
+- Ensure you've run the build script to populate the `lib/` directory
+- Check: `ls lib/*.whl`
 
 ## 🏗️ Building This Package
 
@@ -150,12 +150,14 @@ pip install -e .
 This will:
 1. Build the pubtools-adc wheel
 2. Download all dependency wheels
-3. Populate the `offline-pubtools-adc/dist/` directory
-4. Create a compressed tarball in `dist/offline/`
+3. Create staging directory `build-offline/offline-pubtools-adc/` with `lib/` subdirectory
+4. Copy installation files and populate the `lib/` directory
+5. Create a compressed tarball containing just the `offline-pubtools-adc/` directory
 
 ## 📦 Package Information
 
 - **Package built for**: Linux x86_64
 - **Python compatibility**: 3.6+
 - **Installation type**: Fully offline
-- **Dependencies**: Pre-bundled as wheels
+- **Dependencies**: Pre-bundled as wheels in `lib/` directory
+- **Extracted directory**: `offline-pubtools-adc/`

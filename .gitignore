@@ -1,6 +1,7 @@
 artifacts/
-offline-pubtools-adc/dist/
+build-offline/
 stage/
+.venv-offline-build/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -26,10 +26,14 @@ print_error() {
 
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR=".venv"
-OFFLINE_DIR="offline-pubtools-adc"
-DIST_DIR="${OFFLINE_DIR}/dist"
+VENV_DIR=".venv-offline-build"
+SOURCE_OFFLINE_DIR="offline-pubtools-adc"
+BUILD_OFFLINE_DIR="build-offline"
+PACKAGE_DIR="${BUILD_OFFLINE_DIR}/offline-pubtools-adc"
+LIB_DIR="${PACKAGE_DIR}/lib"
 TARBALL_OUTPUT_DIR="dist/offline"
+# This script must be executed with python3.11 to match the target environment on bastion
+TARGET_PYTHON_VERSION="py311"
 PY_MODULE_VERSION=$(grep "version=" setup.py | sed 's/.*version="\([^"]*\)".*/\1/')
 VERSION=$(git tag --sort=creatordate | grep -P '\d{4}-\d{2}-\d{2}' | tail -n1)
 
@@ -42,38 +46,19 @@ if [[ -z "$VERSION" ]]; then
     exit 1
 fi
 
-TARBALL_NAME="pubtools-adc-offline-${VERSION}.tar.gz"
+TARBALL_NAME="pubtools-adc-offline-${TARGET_PYTHON_VERSION}-${VERSION}.tar.gz"
 TARBALL_PATH="${TARBALL_OUTPUT_DIR}/${TARBALL_NAME}"
 
 echo -e "${BLUE}🔧 Building pubtools-adc Offline Package${NC}"
 echo -e "${BLUE}======================================${NC}"
 echo "Version: $VERSION (from git tag)"
-echo "Offline directory: $OFFLINE_DIR"
-echo "Distribution directory: $DIST_DIR"
+echo "Source offline directory: $SOURCE_OFFLINE_DIR"
+echo "Build staging directory: $BUILD_OFFLINE_DIR"
+echo "Package directory: $PACKAGE_DIR"
+echo "Library directory: $LIB_DIR"
 echo "Output directory: $TARBALL_OUTPUT_DIR"
 echo "Output tarball: $TARBALL_PATH"
 echo
-
-# Check if offline directory exists
-if [[ ! -d "$OFFLINE_DIR" ]]; then
-    print_error "Offline directory not found: $OFFLINE_DIR"
-    echo "This directory should contain the install-offline.sh and README.md files."
-    echo "Please ensure the offline-pubtools-adc directory exists in the project."
-    exit 1
-fi
-
-# Check if required files exist
-if [[ ! -f "$OFFLINE_DIR/install-offline.sh" ]]; then
-    print_error "Missing required file: $OFFLINE_DIR/install-offline.sh"
-    exit 1
-fi
-
-if [[ ! -f "$OFFLINE_DIR/README.md" ]]; then
-    print_error "Missing required file: $OFFLINE_DIR/README.md"
-    exit 1
-fi
-
-print_status "Found existing offline package directory with required files"
 
 # Check if virtual environment exists and is activated
 if [[ "$VIRTUAL_ENV" == "" ]]; then
@@ -84,7 +69,6 @@ if [[ "$VIRTUAL_ENV" == "" ]]; then
         print_error "No virtual environment found. Please create one first:"
         echo "  python3 -m venv $VENV_DIR"
         echo "  source $VENV_DIR/bin/activate"
-        echo "  pip install -e ."
         exit 1
     fi
 else
@@ -92,69 +76,80 @@ else
 fi
 
 # Clean up previous build if it exists
-if [[ -d "$DIST_DIR" ]]; then
-    print_warning "Cleaning existing distribution directory..."
-    rm -rf "$DIST_DIR"/*
+if [[ -d "$BUILD_OFFLINE_DIR" ]]; then
+    print_warning "Cleaning existing build directory..."
+    rm -rf "$BUILD_OFFLINE_DIR"
 fi
 
-print_status "Creating distribution directory..."
-mkdir -p "$DIST_DIR"
-
-if [[ -f "$TARBALL_PATH" ]]; then
-    print_warning "Removing existing $TARBALL_PATH..."
-    rm -f "$TARBALL_PATH"
+if [[ -f "dist/pubtools_adc*" ]]; then
+    print_warning "Removing existing pubtools-adc wheel..."
+    rm -f "dist/pubtools_adc*"
 fi
+
+if [[ -d "$TARBALL_OUTPUT_DIR" ]]; then
+    print_warning "Removing existing $TARBALL_OUTPUT_DIR..."
+    rm -rf "$TARBALL_OUTPUT_DIR"
+fi
+
+print_status "Creating build directory tree..."
+mkdir -p "$LIB_DIR"
+
+# Copy required files from source offline directory
+print_status "Copying install script and documentation..."
+cp "$SOURCE_OFFLINE_DIR/install-offline.sh" "$PACKAGE_DIR/"
+cp "$SOURCE_OFFLINE_DIR/README.md" "$PACKAGE_DIR/"
 
 # Install build dependencies if needed
 print_status "Installing build dependencies..."
-pip install -q build wheel
+pip3 install -q build wheel
 
 # Build the pubtools-adc wheel
 print_status "Building pubtools-adc wheel..."
 python -m build --wheel --outdir dist/ > /dev/null 2>&1
 
-# Copy the built wheel to distribution directory
-print_status "Copying pubtools-adc wheel to distribution directory..."
-cp "dist/pubtools_adc-${PY_MODULE_VERSION}-py3-none-any.whl" "$DIST_DIR/"
+# Copy the built wheel to library directory
+print_status "Copying pubtools-adc wheel to library directory..."
+cp "dist/pubtools_adc-${PY_MODULE_VERSION}-py3-none-any.whl" "$LIB_DIR/"
 
 # Download all dependency wheels
 print_status "Downloading dependency wheels..."
 echo "  This may take a few minutes..."
-pip download -q -d "$DIST_DIR" -r requirements.txt
+pip3 download -q -d "$LIB_DIR" -r requirements.txt
 
 # Convert any source distributions to wheels
 print_status "Converting source distributions to wheels..."
-for tarball in "$DIST_DIR"/*.tar.gz; do
+for tarball in "$LIB_DIR"/*.tar.gz; do
     if [[ -f "$tarball" ]]; then
         echo "  Converting $(basename "$tarball")..."
-        pip wheel -q --wheel-dir "$DIST_DIR" "$tarball"
+        pip3 wheel -q --wheel-dir "$LIB_DIR" "$tarball"
         rm "$tarball"
     fi
 done
 
 # Count wheels
-WHEEL_COUNT=$(ls "$DIST_DIR"/*.whl | wc -l)
-print_status "Created $WHEEL_COUNT wheels in $DIST_DIR"
+WHEEL_COUNT=$(ls "$LIB_DIR"/*.whl | wc -l)
+print_status "Created $WHEEL_COUNT wheels in $LIB_DIR"
 
 # Create the tarball
 print_status "Creating tarball: $TARBALL_PATH..."
 mkdir -p "$TARBALL_OUTPUT_DIR"
-tar -czf "$TARBALL_PATH" "$OFFLINE_DIR/"
+# Change to build directory and tar just the offline-pubtools-adc subdirectory
+cd "$BUILD_OFFLINE_DIR" && tar -czf "../$TARBALL_PATH" "offline-pubtools-adc/" && cd "$SCRIPT_DIR"
 
 # Get final sizes
 TARBALL_SIZE=$(du -h "$TARBALL_PATH" | cut -f1)
-OFFLINE_SIZE=$(du -sh "$OFFLINE_DIR" | cut -f1)
+PACKAGE_SIZE=$(du -sh "$PACKAGE_DIR" | cut -f1)
 
 echo
 echo -e "${GREEN}🎉 Build Complete!${NC}"
 echo -e "${GREEN}=================${NC}"
-echo "✓ Offline package directory: $OFFLINE_DIR/ ($OFFLINE_SIZE)"
-echo "✓ Distribution directory: $DIST_DIR/ ($WHEEL_COUNT wheels)"
+echo "✓ Package directory: $PACKAGE_DIR/ ($PACKAGE_SIZE)"
+echo "✓ Library directory: $LIB_DIR/ ($WHEEL_COUNT wheels)"
 echo "✓ Tarball created: $TARBALL_PATH ($TARBALL_SIZE)"
 echo
 
 echo -e "${BLUE}📦 Package Contents:${NC}"
-echo "  - $WHEEL_COUNT pre-built wheels in dist/ directory"
+echo "  - $WHEEL_COUNT pre-built wheels in lib/ directory"
 echo "  - install-offline.sh (automated installer)"
 echo "  - README.md (comprehensive documentation)"
 echo
@@ -162,11 +157,7 @@ echo
 echo -e "${BLUE}🚀 To deploy on target machine:${NC}"
 echo "  1. Transfer: scp $TARBALL_PATH user@target:~/"
 echo "  2. Extract: tar -xzf $TARBALL_NAME"
-echo "  3. Install: cd $OFFLINE_DIR && ./install-offline.sh"
-echo
-
-echo -e "${BLUE}🧪 To test locally:${NC}"
-echo "  cd $OFFLINE_DIR && ./install-offline.sh"
+echo "  3. Install: cd offline-pubtools-adc && ./install-offline.sh"
 echo
 
 echo -e "${GREEN}✅ Ready for air-gapped deployment!${NC}"

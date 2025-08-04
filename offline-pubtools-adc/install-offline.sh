@@ -6,30 +6,30 @@ set -e
 
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DIST_DIR="$SCRIPT_DIR/dist"
-VENV_NAME="pubtools-adc-env"
+LIB_DIR="$SCRIPT_DIR/lib"
+VENV_NAME=".venv-pubtools"
 
 echo "Installing pubtools-adc (OFFLINE MODE)..."
 echo "This will install pubtools-adc and all its dependencies from bundled wheels."
 echo "Working directory: $SCRIPT_DIR"
-echo "Wheels directory: $DIST_DIR"
+echo "Wheels directory: $LIB_DIR"
 echo
 
-# Check if dist directory exists and has wheels
-if [[ ! -d "$DIST_DIR" ]]; then
-    echo "ERROR: Distribution directory not found: $DIST_DIR"
+# Check if lib directory exists and has wheels
+if [[ ! -d "$LIB_DIR" ]]; then
+    echo "ERROR: Library directory not found: $LIB_DIR"
     echo "Please run the build script first to create the offline package."
     exit 1
 fi
 
-WHEEL_COUNT=$(find "$DIST_DIR" -name "*.whl" | wc -l)
+WHEEL_COUNT=$(find "$LIB_DIR" -name "*.whl" | wc -l)
 if [[ $WHEEL_COUNT -eq 0 ]]; then
-    echo "ERROR: No wheel files found in $DIST_DIR"
+    echo "ERROR: No wheel files found in $LIB_DIR"
     echo "Please run the build script first to download dependencies."
     exit 1
 fi
 
-echo "Found $WHEEL_COUNT wheel files in $DIST_DIR"
+echo "Found $WHEEL_COUNT wheel files in $LIB_DIR"
 
 # Check if we're in a virtual environment
 if [[ "$VIRTUAL_ENV" != "" ]]; then
@@ -43,12 +43,12 @@ else
     echo "Virtual environment created and activated"
 fi
 
-# Install all wheels from the dist directory (offline mode)
+# Install all wheels from the lib directory (offline mode)
 echo "Installing all dependencies and pubtools-adc from bundled wheels..."
 echo "Using offline installation (no internet required)..."
 
-# Use --find-links to point to our dist directory and --no-index for offline mode
-pip install --no-index --find-links "$DIST_DIR" "$DIST_DIR"/*.whl
+# Use --find-links to point to our lib directory and --no-index for offline mode
+pip install --no-index --find-links "$LIB_DIR" "$LIB_DIR"/*.whl
 
 # Verify installation
 echo
@@ -70,18 +70,14 @@ echo "🎉 Installation complete!"
 echo "================================"
 echo "✓ All dependencies installed from bundled wheels (no internet required)"
 echo "✓ Total wheels installed: $WHEEL_COUNT"
-echo "✓ Installation directory: $(pwd)"
+echo "✓ Installation directory: $VIRTUAL_ENV"
 
-if [[ "$VIRTUAL_ENV" == "" ]]; then
-    echo
-    echo "📋 To use pubtools-adc:"
-    echo "  source $VENV_NAME/bin/activate"
-    echo "  pubtools-adc-push --help"
-else
-    echo
-    echo "📋 pubtools-adc-push is now available in your current environment"
-    echo "  pubtools-adc-push --help"
-fi
+echo
+echo "📋 To use pubtools-adc:"
+echo "  source $VIRTUAL_ENV/bin/activate"
+echo "  pubtools-adc-push --help"
+echo
+echo "📋 pubtools-adc-push is now available in your current environment"
 
 echo
 echo "🚀 Ready to use!"
