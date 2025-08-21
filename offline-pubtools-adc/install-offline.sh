@@ -7,7 +7,7 @@ set -e
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
-VENV_NAME=".venv-pubtools"
+VENV_DIR="~/.venv-pubtools"
 
 echo "Installing pubtools-adc (OFFLINE MODE)..."
 echo "This will install pubtools-adc and all its dependencies from bundled wheels."
@@ -31,16 +31,19 @@ fi
 
 echo "Found $WHEEL_COUNT wheel files in $LIB_DIR"
 
-# Check if we're in a virtual environment
-if [[ "$VIRTUAL_ENV" != "" ]]; then
-    echo "Using existing virtual environment: $VIRTUAL_ENV"
+# Check if virtual environment exists and is activated
+if [[ "$VIRTUAL_ENV" == "" ]]; then
+    if [[ -d "$VENV_DIR" ]]; then
+        print_status "Activating existing virtual environment..."
+        source "$VENV_DIR/bin/activate"
+    else
+        print_error "No virtual environment found. Please create one first:"
+        echo "  python3 -m venv $VENV_DIR"
+        echo "  source $VENV_DIR/bin/activate"
+        exit 1
+    fi
 else
-    echo "Creating virtual environment: $VENV_NAME"
-    python3 -m venv "$VENV_NAME"
-
-    # Activate the virtual environment
-    source "$VENV_NAME/bin/activate"
-    echo "Virtual environment created and activated"
+    print_status "Using existing virtual environment: $VIRTUAL_ENV"
 fi
 
 # Install all wheels from the lib directory (offline mode)
