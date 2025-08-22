@@ -45,6 +45,7 @@ Examples:
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime
 import boto3
@@ -116,6 +117,16 @@ def transform_image_to_pubmapfile_format(image):
     boot_mode = get_ami_boot_mode(image.get('image_id'),
                                   image.get('region'))
 
+    # Handle release version formatting - append ".0" if version is in "x.y" format
+    release_info = copy.deepcopy(image.get('release', {}))
+    if 'version' in release_info:
+        version = release_info['version']
+        # NOTE: patch version is hard-coded to 0 per
+        #   https://gitlab.cee.redhat.com/stratosphere/starmap-mappings/-/merge_requests/139
+        # Check if version matches "x.y" pattern (e.g., "9.4"), and convert to "x.y.z" format
+        if re.match(r'^\d+\.\d+$', str(version)):
+            release_info['version'] = f"{version}.0"
+
     # Create the transformed image object
     transformed = {
         "attributes": {
@@ -125,7 +136,7 @@ def transform_image_to_pubmapfile_format(image):
             "ena_support": image.get('ena_support', True),
             "public_image": False,           # commercial images imported into ADC regions should never be public; they must be customized first
             "region": image.get('region', 'us-east-1'),
-            "release": image.get('release', {}),
+            "release": release_info,
             "root_device": image.get('root_device', ''),
             "sriov_net_support": image.get('sriov_net_support', ''),
             "type": image.get('type', 'hourly'),
