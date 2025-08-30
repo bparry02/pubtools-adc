@@ -127,6 +127,15 @@ def transform_image_to_pubmapfile_format(image):
         if re.match(r'^\d+\.\d+$', str(version)):
             release_info['version'] = f"{version}.0"
 
+    # Handle base_product - expected to be null/empty, set to "import" to distinguish from built images
+    base_product = release_info.get('base_product')
+    if base_product is None or base_product == '':
+        release_info['base_product'] = 'import'
+    else:
+        print(f"Error: release.base_product contains value '{base_product}' but we expect it to be null or empty")
+        print("Expected base_product to be null/empty so it can be set to 'import'")
+        sys.exit(1)
+
     # Create the transformed image object
     transformed = {
         "attributes": {
