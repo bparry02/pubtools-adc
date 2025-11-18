@@ -161,6 +161,15 @@ def transform_image_to_pubmapfile_format(image):
         "relative_path": relative_path
     }
 
+    # Print the metadata for the processed image
+    version = transformed["attributes"]["release"].get("version", "unknown")
+    release_variant = transformed["attributes"]["release"].get('variant', 'unknown')
+    variant = "HiAvai" if release_variant == "HighAvailability" else release_variant
+    arch = transformed["attributes"]["release"].get('arch', 'unknown')
+    image_id = image.get('image_id', 'unknown')
+    image_name = transformed.get('filename', 'unknown')
+    print(f"Processed image:  {version}  {variant} {arch}  {image_id}  {image_name}")
+
     return transformed
 
 def main():
