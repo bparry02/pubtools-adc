@@ -15,7 +15,7 @@ For each region, it creates two files:
 - pub-mapfile-<timestamp>.json (main version)
 - test-pub-mapfile-<timestamp>.json (test version with empty billing codes)
 
-Files are organized in the directory structure: {output-dir}/{errata}/{region}/
+Files are organized in the directory structure: {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}/
 
 The script uses boto3 to describe AMIs and extract boot_mode information.
 AWS credentials must be configured (via AWS CLI, environment variables,
@@ -28,19 +28,19 @@ Requirements:
     - EC2:DescribeImages permission
 
 Usage:
-    python3 generate_pubmapfile.py --clouds-json-dir <directory> [--output-dir OUTPUT_DIR]
+    python3 generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--output-dir OUTPUT_DIR]
     or
-    ./generate_pubmapfile.py --clouds-json-dir <directory> [--output-dir OUTPUT_DIR]
+    ./generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--output-dir OUTPUT_DIR]
 
 Examples:
-    python3 generate_pubmapfile.py --clouds-json-dir stage/
-    # Creates files in: ./dist/pub-mapfile/{errata}/{region}/
+    python3 generate_pubmapfile.py --clouds-json-dir stage/ --cloudx-jira CLOUDX-123
+    # Creates files in: ./dist/pub-mapfile/{today's date}/rhel{version}-CLOUDX-123/{region}/
 
-    python3 generate_pubmapfile.py --clouds-json-dir stage/ --output-dir /tmp/myfiles
-    # Creates files in: /tmp/myfiles/{errata}/{region}/
+    python3 generate_pubmapfile.py --clouds-json-dir stage/ --cloudx-jira CLOUDX-123 --ami-adc-release-date 2024-12-01
+    # Creates files in: ./dist/pub-mapfile/2024-12-01/rhel{version}-CLOUDX-123/{region}/
 
-    ./generate_pubmapfile.py --clouds-json-dir /path/to/json/files --output-dir ./output
-    # Creates files in: ./output/{errata}/{region}/
+    ./generate_pubmapfile.py --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --output-dir ./output
+    # Creates files in: ./output/{today's date}/rhel{version}-CLOUDX-456/{region}/
 """
 
 import argparse
@@ -170,18 +170,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --clouds-json-dir stage/
-  %(prog)s --clouds-json-dir stage/ --output-dir /tmp
-  %(prog)s --clouds-json-dir /path/to/json/files --output-dir ./output
+  %(prog)s --clouds-json-dir stage/ --cloudx-jira CLOUDX-123
+  %(prog)s --clouds-json-dir stage/ --cloudx-jira CLOUDX-123 --ami-adc-release-date 2024-12-01
+  %(prog)s --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --output-dir ./output
 
-Output files will be created in: {output-dir}/{errata}/{region}/
+Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}/
         """
     )
     parser.add_argument('--clouds-json-dir', '-c',
                         help='Path to directory containing *.json files to process',
                         required=True)
+    parser.add_argument('--cloudx-jira', '-j',
+                        help='CLOUDX JIRA ID for the image release (e.g., CLOUDX-123)',
+                        required=True)
+    parser.add_argument('--ami-adc-release-date', '-r',
+                        help='AMI ADC release date in YYYY-MM-DD format (default: today)',
+                        default=datetime.now().strftime('%Y-%m-%d'))
     parser.add_argument('--output-dir', '-o',
-                        help='Base directory for output files. Files will be written to {output-dir}/{errata}/{region}/ (default: ./dist/pub-mapfile)',
+                        help='Base directory for output files. Files will be written to {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}/ (default: ./dist/pub-mapfile)',
                         default='./dist/pub-mapfile')
 
     args = parser.parse_args()
@@ -256,9 +262,18 @@ Output files will be created in: {output-dir}/{errata}/{region}/
         }
     }
 
-    # Get errata from first filtered image for directory structure
-    errata = filtered_images[0].get('origin', 'unknown_errata').replace(':', '_')
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Extract RHEL major version from first transformed object for cloudx-jira prefix
+    if transformed_files:
+        release_version = transformed_files[0]['attributes']['release']['version']
+        # Extract major version (e.g., "9.4.0" -> "9")
+        major_version = release_version.split('.')[0]
+        rhel_version = f"rhel{major_version}"
+    else:
+        # unknown RHEL version
+        print("Warning: RHEL version not found in the first transformed file, using 'rhel' as the version prefix")
+        rhel_version = "rhel"
 
     # Define the three regions to generate files for
     regions = ["us-east-1", "us-iso-east-1", "us-isob-east-1"]
@@ -280,8 +295,8 @@ Output files will be created in: {output-dir}/{errata}/{region}/
                 "name": "HourlyTest"
             }
 
-        # Create directory structure: {output-dir}/{errata}/{region}
-        region_output_dir = os.path.join(args.output_dir, errata, region)
+        # Create directory structure: {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}
+        region_output_dir = os.path.join(args.output_dir, args.ami_adc_release_date, f"{rhel_version}-{args.cloudx_jira}", region)
         if not os.path.exists(region_output_dir):
             os.makedirs(region_output_dir)
 
