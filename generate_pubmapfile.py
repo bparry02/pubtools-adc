@@ -28,9 +28,9 @@ Requirements:
     - EC2:DescribeImages permission
 
 Usage:
-    python3 generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--output-dir OUTPUT_DIR]
+    python3 generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--image-dir IMAGE_DIR] [--output-dir OUTPUT_DIR]
     or
-    ./generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--output-dir OUTPUT_DIR]
+    ./generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--image-dir IMAGE_DIR] [--output-dir OUTPUT_DIR]
 
 Examples:
     python3 generate_pubmapfile.py --clouds-json-dir stage/ --cloudx-jira CLOUDX-123
@@ -39,12 +39,14 @@ Examples:
     python3 generate_pubmapfile.py --clouds-json-dir stage/ --cloudx-jira CLOUDX-123 --ami-adc-release-date 2024-12-01
     # Creates files in: ./dist/pub-mapfile/2024-12-01/rhel{version}-CLOUDX-123/{region}/
 
-    ./generate_pubmapfile.py --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --output-dir ./output
+    ./generate_pubmapfile.py --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --image-dir /path/to/images --output-dir ./output
+    # Verifies MD5 checksums of image files in /path/to/images
     # Creates files in: ./output/{today's date}/rhel{version}-CLOUDX-456/{region}/
 """
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -55,6 +57,67 @@ from botocore.exceptions import ClientError, BotoCoreError
 import copy
 from cloudimg.aws import AWSBootMode
 
+
+def calculate_checksum(file_path, hash_algorithm):
+    """
+    Calculate hash of a file using the specified algorithm.
+
+    Args:
+        file_path: Path to the file
+        hash_algorithm: Hash algorithm instance (e.g., hashlib.md5(), hashlib.sha256())
+
+    Returns:
+        str: Hash in hexadecimal format
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        Exception: For other file access errors
+    """
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_algorithm.update(chunk)
+        return hash_algorithm.hexdigest()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Image file not found: {file_path}")
+    except Exception as e:
+        raise Exception(f"Error reading file {file_path}: {e}")
+
+
+def verify_checksum(image_src_filename, expected_md5):
+    """
+    Verify MD5 checksum of an image file and calculate SHA256.
+
+    Args:
+        image_src_filename: Full path to the image file
+        expected_md5: Expected MD5 checksum from image metadata
+
+    Returns:
+        str: SHA256 checksum of the file
+
+    Raises:
+        SystemExit: If verification fails or MD5 is missing
+    """
+    if not expected_md5:
+        print(f"Error: No MD5 checksum provided for {image_src_filename}, cannot verify image file integrity")
+        sys.exit(1)
+
+    try:
+        # Calculate MD5 for verification
+        calculated_md5 = calculate_checksum(image_src_filename, hashlib.md5())
+
+        if calculated_md5.lower() != expected_md5.lower():
+            print(f"Error: MD5 mismatch for {image_src_filename}")
+            print(f"  Expected: {expected_md5}")
+            print(f"  Calculated: {calculated_md5}")
+            sys.exit(1)
+
+        # Calculate SHA256 for pub-mapfile format
+        return calculate_checksum(image_src_filename, hashlib.sha256())
+
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 def get_ami_boot_mode(image_id, region='us-east-1'):
@@ -106,15 +169,24 @@ def get_ami_boot_mode(image_id, region='us-east-1'):
         print("Please check your AWS configuration, credentials, and network connectivity.")
         sys.exit(1)
 
-def transform_image_to_pubmapfile_format(image):
+def transform_image_to_pubmapfile_format(image, image_dir=None):
     """
     Transform a clouds.json image to pub-mapfile format.
+
+    Args:
+        image: Image object from clouds.json
+        image_dir: Optional directory containing image files for MD5 verification
     """
     # Convert from absolute path to relative path format expected by pub-mapfile
     src_filename = os.path.basename(image.get('src'))
     # NOTE: image files are expected to be staged before running pubtools-adc-push
     # A stage directory with AWS_IMAGES directory is required by pubtool-adc-push
     relative_path = f"{image.get('region')}/AWS_IMAGES/{src_filename}"
+
+    # Verify MD5 checksum if image_dir is provided and calculate SHA256
+    sha256sum = None
+    if image_dir:
+        sha256sum = verify_checksum(os.path.join(image_dir, src_filename), image.get('md5sum'))
 
     boot_mode = get_ami_boot_mode(image.get('image_id'),
                                   image.get('region'))
@@ -155,8 +227,7 @@ def transform_image_to_pubmapfile_format(image):
             "volume": image.get('volume', '')
         },
         "filename": image.get('name', ''),   # NOTE: for reference only, image name is dynamically generated by pubtool-adc
-        # TODO: only sha256sum is supported in the pub-mapfile format
-        # "md5sum": image.get('md5sum', ''),
+        "sha256sum": sha256sum,
         "version": image.get('origin', ''),
         "relative_path": relative_path
     }
@@ -181,7 +252,7 @@ def main():
 Examples:
   %(prog)s --clouds-json-dir stage/ --cloudx-jira CLOUDX-123
   %(prog)s --clouds-json-dir stage/ --cloudx-jira CLOUDX-123 --ami-adc-release-date 2024-12-01
-  %(prog)s --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --output-dir ./output
+  %(prog)s --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --image-dir /path/to/images --output-dir ./output
 
 Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}/
         """
@@ -195,6 +266,9 @@ Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-versi
     parser.add_argument('--ami-adc-release-date', '-r',
                         help='AMI ADC release date in YYYY-MM-DD format (default: today)',
                         default=datetime.now().strftime('%Y-%m-%d'))
+    parser.add_argument('--image-dir', '-i',
+                        help='Optional directory containing image files for MD5 verification',
+                        default=None)
     parser.add_argument('--output-dir', '-o',
                         help='Base directory for output files. Files will be written to {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}/ (default: ./dist/pub-mapfile)',
                         default='./dist/pub-mapfile')
@@ -249,7 +323,7 @@ Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-versi
         )
     ]
 
-    print(f"Found {len(filtered_images)} images with 'us-east-1-hourly' in dest attribute (excluding SAP)")
+    print(f"Found {len(filtered_images)} images with 'us-east-1-hourly' in dest attribute (excluding SAP)\n")
 
     if not filtered_images:
         print("Error:No images found matching the filter criteria. Exiting.")
@@ -258,8 +332,10 @@ Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-versi
     # Transform images to pub-mapfile format
     transformed_files = []
     for image in filtered_images:
-        transformed = transform_image_to_pubmapfile_format(image)
+        transformed = transform_image_to_pubmapfile_format(image, args.image_dir)
         transformed_files.append(transformed)
+
+    print(f"Total images transformed: {len(transformed_files)}\n")
 
     # Create the pub-mapfile structure
     pub_mapfile = {
@@ -331,6 +407,14 @@ Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-versi
         except Exception as e:
             print(f"Error writing output files for region {region}: {e}")
             continue
+
+    # Print SHA256 checksums for all transformed files (only if image_dir was provided)
+    if args.image_dir:
+        print(f"\nImage file SHA256 checksums for use in transfer ticket:")
+        for file_entry in transformed_files:
+            if file_entry.get('sha256sum'):
+                filename = os.path.basename(file_entry.get('relative_path'))
+                print(f"{file_entry['sha256sum']}  {filename}")
 
 if __name__ == "__main__":
     main()
