@@ -28,11 +28,14 @@ Requirements:
     - EC2:DescribeImages permission
 
 Usage:
+    # Generate pub-mapfile from clouds.json files:
     python3 generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--image-dir IMAGE_DIR] [--output-dir OUTPUT_DIR]
-    or
-    ./generate_pubmapfile.py --clouds-json-dir <directory> --cloudx-jira <jira-id> [--ami-adc-release-date YYYY-MM-DD] [--image-dir IMAGE_DIR] [--output-dir OUTPUT_DIR]
+
+    # Combine existing pub-mapfile JSON files from multiple cloudx-jira releases:
+    python3 generate_pubmapfile.py --combine-image-releases-path <release-directory>
 
 Examples:
+    # Generate pub-mapfile from clouds.json files:
     python3 generate_pubmapfile.py --clouds-json-dir stage/ --cloudx-jira CLOUDX-123
     # Creates files in: ./dist/pub-mapfile/{today's date}/rhel{version}-CLOUDX-123/{region}/
 
@@ -42,6 +45,11 @@ Examples:
     ./generate_pubmapfile.py --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --image-dir /path/to/images --output-dir ./output
     # Verifies MD5 checksums of image files in /path/to/images
     # Creates files in: ./output/{today's date}/rhel{version}-CLOUDX-456/{region}/
+
+    # Combine existing pub-mapfile JSON files from multiple cloudx-jira releases:
+    python3 generate_pubmapfile.py --combine-image-releases-path ./dist/pub-mapfile/2024-12-01
+    # Combines all JSON files from rhel{version}-CLOUDX-* subdirectories
+    # Creates combined files in: ./dist/pub-mapfile/2024-12-01/combined/{region}/
 """
 
 import argparse
@@ -243,26 +251,174 @@ def transform_image_to_pubmapfile_format(image, image_dir=None):
 
     return transformed
 
+def combine_json_files(combine_path):
+    """
+    Combine JSON files from multiple cloudx-jira directories into consolidated files per region.
+
+    Args:
+        combine_path: Path to directory containing {rhel-version}-{cloudx-jira} subdirectories
+    """
+    print(f"Combining JSON files from release directory: {combine_path}")
+
+    # Check if the combine path exists
+    if not os.path.exists(combine_path):
+        print(f"Error: Directory {combine_path} does not exist")
+        sys.exit(1)
+
+    # Find all cloudx-jira subdirectories (pattern: rhel{version}-CLOUDX-{number})
+    cloudx_dirs = []
+    for item in os.listdir(combine_path):
+        item_path = os.path.join(combine_path, item)
+        if os.path.isdir(item_path) and re.match(r'^rhel\d+-CLOUDX-\d+$', item):
+            cloudx_dirs.append(item_path)
+
+    if not cloudx_dirs:
+        print(f"Error: No cloudx-jira subdirectories found in {combine_path}")
+        print("Expected directories matching pattern: rhel{version}-CLOUDX-{number}")
+        sys.exit(1)
+
+    print(f"Found {len(cloudx_dirs)} cloudx-jira directories:")
+    for dir_path in cloudx_dirs:
+        print(f"  {os.path.basename(dir_path)}")
+
+    # Extract release date from combine_path for output filenames
+    release_date = os.path.basename(os.path.normpath(combine_path))
+
+    # Define regions to process
+    regions = ["us-east-1", "us-iso-east-1", "us-isob-east-1"]
+
+    # Process each region
+    for region in regions:
+        print(f"\nProcessing region: {region}")
+
+        # Collect all pub-mapfile and test-pub-mapfile JSON files for this region
+        pub_mapfiles = []
+        test_pub_mapfiles = []
+
+        for cloudx_dir in cloudx_dirs:
+            region_dir = os.path.join(cloudx_dir, region)
+            if not os.path.exists(region_dir):
+                print(f"  Warning: Region directory {region_dir} does not exist, skipping")
+                continue
+
+            # Find JSON files in this region directory
+            json_files = glob.glob(os.path.join(region_dir, "*.json"))
+            cloudx_name = os.path.basename(cloudx_dir)
+
+            for json_file in json_files:
+                filename = os.path.basename(json_file)
+                if filename.startswith("test-pub-mapfile-"):
+                    test_pub_mapfiles.append((json_file, cloudx_name))
+                elif filename.startswith("pub-mapfile-"):
+                    pub_mapfiles.append((json_file, cloudx_name))
+
+        if not pub_mapfiles and not test_pub_mapfiles:
+            print(f"  No JSON files found for region {region}, skipping")
+            continue
+
+        print(f"  Found {len(pub_mapfiles)} pub-mapfile and {len(test_pub_mapfiles)} test-pub-mapfile files")
+
+        # Combine pub-mapfile JSON files
+        if pub_mapfiles:
+            combined_pub_mapfile = combine_mapfile_jsons(pub_mapfiles)
+
+        # Combine test-pub-mapfile JSON files
+        if test_pub_mapfiles:
+            combined_test_pub_mapfile = combine_mapfile_jsons(test_pub_mapfiles)
+
+        # Create combined output directory
+        combined_output_dir = os.path.join(combine_path, "combined", region)
+        if not os.path.exists(combined_output_dir):
+            os.makedirs(combined_output_dir)
+
+        # Write combined files
+        if pub_mapfiles and combined_pub_mapfile:
+            output_path = os.path.join(combined_output_dir, f"pub-mapfile-combined-{release_date}.json")
+            try:
+                with open(output_path, 'w') as f:
+                    json.dump(combined_pub_mapfile, f, indent=2)
+                total_files = len(combined_pub_mapfile['payload']['files'])
+                print(f"  Successfully created {output_path} with {total_files} combined image files")
+            except Exception as e:
+                print(f"  Error writing combined pub-mapfile for region {region}: {e}")
+
+        if test_pub_mapfiles and combined_test_pub_mapfile:
+            test_output_path = os.path.join(combined_output_dir, f"test-pub-mapfile-combined-{release_date}.json")
+            try:
+                with open(test_output_path, 'w') as f:
+                    json.dump(combined_test_pub_mapfile, f, indent=2)
+                total_files = len(combined_test_pub_mapfile['payload']['files'])
+                print(f"  Successfully created {test_output_path} with {total_files} combined image files (test version)")
+            except Exception as e:
+                print(f"  Error writing combined test-pub-mapfile for region {region}: {e}")
+
+def combine_mapfile_jsons(json_files_list):
+    """
+    Combine multiple mapfile JSON files into a single consolidated JSON.
+
+    Args:
+        json_files_list: List of tuples (json_file_path, cloudx_name)
+
+    Returns:
+        dict: Combined JSON structure
+    """
+    combined_files = []
+    header = None
+
+    for json_file_path, cloudx_name in json_files_list:
+        try:
+            with open(json_file_path, 'r') as f:
+                data = json.load(f)
+
+            # Store the header from the first file
+            if header is None:
+                header = data.get('header', {"version": "0.2"})
+
+            # Collect files from this JSON
+            payload_files = data.get('payload', {}).get('files', [])
+            combined_files.extend(payload_files)
+
+            #print(f"    Added {len(payload_files)} files from {cloudx_name}/{os.path.basename(json_file_path)}")
+
+        except Exception as e:
+            print(f"    Error reading {json_file_path}: {e}")
+            continue
+
+    # Create the combined JSON structure
+    combined_json = {
+        "header": header,
+        "payload": {
+            "files": combined_files
+        }
+    }
+
+    return combined_json
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description='Transform clouds.json files to pub-mapfile format',
+        description='Transform clouds.json files to pub-mapfile format OR combine existing pub-mapfile JSON files',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Generate pub-mapfile from clouds.json files:
   %(prog)s --clouds-json-dir stage/ --cloudx-jira CLOUDX-123
   %(prog)s --clouds-json-dir stage/ --cloudx-jira CLOUDX-123 --ami-adc-release-date 2024-12-01
   %(prog)s --clouds-json-dir /path/to/json/files --cloudx-jira CLOUDX-456 --image-dir /path/to/images --output-dir ./output
 
+  # Combine existing pub-mapfile JSON files from multiple cloudx-jira releases:
+  %(prog)s --combine-image-releases-path ./dist/pub-mapfile/2024-12-01
+
 Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}/
+Combined files will be created in: {combine-image-releases-path}/combined/{region}/
         """
     )
     parser.add_argument('--clouds-json-dir', '-c',
-                        help='Path to directory containing *.json files to process',
-                        required=True)
+                        help='Path to directory containing *.json files to process (required for generation mode)',
+                        required=False)
     parser.add_argument('--cloudx-jira', '-j',
-                        help='CLOUDX JIRA ID for the image release (e.g., CLOUDX-123)',
-                        required=True)
+                        help='CLOUDX JIRA ID for the image release (e.g., CLOUDX-123) (required for generation mode)',
+                        required=False)
     parser.add_argument('--ami-adc-release-date', '-r',
                         help='AMI ADC release date in YYYY-MM-DD format (default: today)',
                         default=datetime.now().strftime('%Y-%m-%d'))
@@ -272,8 +428,23 @@ Output files will be created in: {output-dir}/{ami-adc-release-date}/{rhel-versi
     parser.add_argument('--output-dir', '-o',
                         help='Base directory for output files. Files will be written to {output-dir}/{ami-adc-release-date}/{rhel-version}-{cloudx-jira}/{region}/ (default: ./dist/pub-mapfile)',
                         default='./dist/pub-mapfile')
+    parser.add_argument('--combine-image-releases-path', '-C',
+                        help='Path to existing release directory containing multiple {rhel-version}-{cloudx-jira} subdirectories to combine into consolidated files per region. When specified, combines existing JSON files instead of processing clouds.json files.',
+                        default=None)
 
     args = parser.parse_args()
+
+    # Validate arguments based on mode
+    if args.combine_image_releases_path:
+        # Combine mode - only combine_image_releases_path is required
+        combine_json_files(args.combine_image_releases_path)
+        return
+    else:
+        # Generation mode - clouds_json_dir and cloudx_jira are required
+        if not args.clouds_json_dir:
+            parser.error("--clouds-json-dir is required for generation mode")
+        if not args.cloudx_jira:
+            parser.error("--cloudx-jira is required for generation mode")
 
     # Read all *.json files from directory
     clouds_data = []
