@@ -251,6 +251,26 @@ def transform_image_to_pubmapfile_format(image, image_dir=None):
 
     return transformed
 
+def write_json_file(output_path, json_data, description=""):
+    """
+    Write JSON data to a file with error handling and logging.
+
+    Args:
+        output_path: Path where the JSON file should be written
+        json_data: Dictionary containing the JSON data to write
+        description: Optional description for the log message (e.g., "test version")
+    """
+    try:
+        with open(output_path, 'w') as f:
+            json.dump(json_data, f, indent=2)
+
+        file_count = len(json_data.get('payload', {}).get('files', []))
+        desc_suffix = f" ({description})" if description else ""
+        print(f"Successfully created {output_path} with {file_count} image files{desc_suffix}")
+
+    except Exception as e:
+        print(f"Error writing {output_path}: {e}")
+
 def combine_json_files(combine_path):
     """
     Combine JSON files from multiple cloudx-jira directories into consolidated files per region.
@@ -334,23 +354,11 @@ def combine_json_files(combine_path):
         # Write combined files
         if pub_mapfiles and combined_pub_mapfile:
             output_path = os.path.join(combined_output_dir, f"pub-mapfile-combined-{release_date}.json")
-            try:
-                with open(output_path, 'w') as f:
-                    json.dump(combined_pub_mapfile, f, indent=2)
-                total_files = len(combined_pub_mapfile['payload']['files'])
-                print(f"  Successfully created {output_path} with {total_files} combined image files")
-            except Exception as e:
-                print(f"  Error writing combined pub-mapfile for region {region}: {e}")
+            write_json_file(output_path, combined_pub_mapfile)
 
         if test_pub_mapfiles and combined_test_pub_mapfile:
             test_output_path = os.path.join(combined_output_dir, f"test-pub-mapfile-combined-{release_date}.json")
-            try:
-                with open(test_output_path, 'w') as f:
-                    json.dump(combined_test_pub_mapfile, f, indent=2)
-                total_files = len(combined_test_pub_mapfile['payload']['files'])
-                print(f"  Successfully created {test_output_path} with {total_files} combined image files (test version)")
-            except Exception as e:
-                print(f"  Error writing combined test-pub-mapfile for region {region}: {e}")
+            write_json_file(test_output_path, combined_test_pub_mapfile, "test version")
 
 def combine_mapfile_jsons(json_files_list):
     """
@@ -564,20 +572,8 @@ Combined files will be created in: {combine-image-releases-path}/combined/{regio
         test_output_path = os.path.join(region_output_dir, test_output_filename)
 
         # Write both output files for this region
-        try:
-            # Write main pub-mapfile
-            with open(output_path, 'w') as f:
-                json.dump(region_pub_mapfile, f, indent=2)
-            print(f"Successfully created {output_path} with {len(transformed_files)} image files")
-
-            # Write test pub-mapfile
-            with open(test_output_path, 'w') as f:
-                json.dump(region_test_pub_mapfile, f, indent=2)
-            print(f"Successfully created {test_output_path} with {len(transformed_files)} image files (test version)")
-
-        except Exception as e:
-            print(f"Error writing output files for region {region}: {e}")
-            continue
+        write_json_file(output_path, region_pub_mapfile)
+        write_json_file(test_output_path, region_test_pub_mapfile, "test version")
 
     # Print SHA256 checksums for all transformed files (only if image_dir was provided)
     if args.image_dir:
